@@ -1,69 +1,85 @@
-# mini-watch 2일차 시작 코드
+# 모아 게시판 · mini-watch CRUD
 
-`day02-start`는 2일차 1교시에서 사용할 작은 시작 코드다. `general`은 게시글을 보여 주고, `monitor/backend`는 일반 서비스에 요청을 전달한다. 이번 브랜치에는 아직 DB 연결 기능이 없다.
+Flask, Jinja2, PostgreSQL로 만든 게시판입니다. 글 작성·목록·상세 조회·수정·삭제와
+입력 오류 안내를 제공하며, 일반 서비스의 요청 기록을 별도 감시 서비스에 전달합니다.
 
-복제한 프로젝트 폴더를 VS Code에서 연다. `Ctrl+Shift+P` → `Terminal: Select Default Profile` → **Command Prompt(명령 프롬프트, CMD)**를 선택하고 새 터미널을 연다.
+## 시작하기
 
-## 일반 서비스 실행
+Python과 PostgreSQL이 필요합니다. PostgreSQL에서 사용할 DB를 먼저 준비하세요.
+수업 환경의 기존 `general_db`를 그대로 사용할 수 있습니다.
 
-VS Code의 **general 폴더를 오른쪽 클릭 → 통합 터미널에서 열기**를 선택한다. CMD에서 이 폴더의 가상환경을 처음 한 번 만든다.
+아래는 프로젝트 루트에서 실행하는 PowerShell 명령입니다.
 
-```text
+```powershell
+cd general
 python -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-가상환경을 켠다. 입력 줄 앞에 `(venv)`가 붙으면 켜진 것이다.
+`.env`의 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`를
+본인의 PostgreSQL 접속 정보로 수정하세요. 기존 `.env`가 있다면 복사하지 않고 유지합니다.
 
-```text
-venv\Scripts\activate
+```powershell
+.\venv\Scripts\python.exe prepare_db.py
+.\venv\Scripts\python.exe app.py
 ```
 
-패키지 목록을 설치한다.
+별도 터미널에서 감시 서버를 실행합니다.
 
-```text
-python -m pip install -r requirements.txt
-```
-
-일반 서버를 실행한다. 이 창은 켜 둔다.
-
-```text
-python app.py
-```
-
-크롬에서 http://127.0.0.1:5100/posts/1 을 열면 1번 게시글이 나온다.
-
-## 감시 서비스 실행
-
-VS Code의 **monitor 아래 backend 폴더를 오른쪽 클릭 → 통합 터미널에서 열기**로 별도의 CMD를 연다. 이 폴더에도 가상환경을 처음 한 번 만든다.
-
-```text
+```powershell
+cd monitor\backend
 python -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe app.py
 ```
 
-가상환경을 켠다.
+- 게시판: http://127.0.0.1:5100/
+- 로그인 판정: http://127.0.0.1:5100/login
+- 감시 기록: http://127.0.0.1:5200/api/events
+
+기존 `posts(id, title, body)` 데이터와 DB 설정을 유지합니다.
+`prepare_db.py`는 테이블이 없으면 생성하고, 자동 번호 설정이 없는 테이블에는
+기존 최대 번호 다음부터 시작하는 시퀀스를 연결합니다.
+
+선택 로그인 기능은 기존 수업 `users` 테이블을 사용합니다. 새 DB에서 필요한 경우
+`general/sql/prepare_users.sql`을 실행한 뒤 `general/create_user.py`로 테스트 사용자를 만드세요.
+비밀번호는 실행 시 입력받아 해시로 저장합니다.
+
+## 구조
 
 ```text
-venv\Scripts\activate
+general/
+  app.py                 앱 생성·등록·실행
+  db.py                  PostgreSQL 연결
+  post_rules.py          공통 입력 검사
+  repositories/          게시글·사용자 SQL
+  routes/                Blueprint 및 HTTP 처리
+  request_logging.py     감시 서비스 JSON 전송
+  templates/             Jinja2 화면
+  static/                CSS·JavaScript
+  sql/                   DB 준비 SQL
+  tests/                 PostgreSQL 및 감시 서비스 통합 검증
+monitor/backend/         요청 기록 수집 서비스
 ```
 
-`(venv)`를 확인하고 패키지 목록을 설치한다.
+잘못된 작성·수정은 `400`, 없는 글은 `404`, 저장·수정·삭제 후 이동은 `303`입니다.
+삭제 확인 GET은 조회만 하고, 실제 삭제는 POST에서 처리합니다.
+기존 `/posts/<번호>` JSON 조회와 `/auth/login` 로그인 판정도 유지합니다.
 
-```text
-python -m pip install -r requirements.txt
+## 테스트
+
+`general`에서 실행합니다. `.env`로 접속한 PostgreSQL에 테스트용 스키마를
+만들었다가 제거하며 기존 게시글·사용자는 변경하지 않습니다.
+
+```powershell
+.\venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-감시 서버를 실행한다.
+## 과제 제출
 
-```text
-python app.py
-```
+과제 페이지에서 **GitHub 저장소**를 선택하고 이 저장소의 주소를 입력합니다.
+DB 비밀번호가 들어 있는 `.env`, 가상환경, 캐시는 Git에서 제외합니다.
+자세한 기능과 요구사항은 `CRUD_GUIDE.md`, `TASK_REQUIREMENTS.md`를 참고하세요.
 
-크롬에서 http://127.0.0.1:5200/posts/1 을 열면 일반 서버와 같은 게시글이 나온다.
-
-새 CMD를 열 때는 해당 서비스 폴더에서 가상환경을 다시 켠다. 서버 코드를 고치면 저장한 뒤 서버 창에서 `Ctrl+C`로 멈추고 `python app.py`로 다시 실행한다.
-
-## 수업 이어가기
-
-이 폴더에서 1교시부터 차례로 기능을 붙인다. `day03-start` 브랜치에는 3일차 시작 코드(2일차 완성 상태)와 DB 준비·실행 안내가 있다.
-
-`venv`, Python 캐시와 실제 `.env`는 Git에 포함하지 않는다. 패키지는 서비스별 `requirements.txt`로 각 컴퓨터에서 설치한다.
+수업 시작 프로젝트: https://github.com/zeroskill2400/mini-watch
