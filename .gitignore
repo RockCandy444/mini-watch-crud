@@ -8,3 +8,6 @@ dist/
 test-results/
 .test.env
 .local/
+.next/
+out/
+.env.local

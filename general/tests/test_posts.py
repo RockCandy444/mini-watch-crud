@@ -11,11 +11,13 @@ from unittest.mock import patch
 import uuid
 
 from psycopg import sql
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from werkzeug.serving import make_server
 
 from app import create_app
-from db import connect_db
+from db import connect_db, orm_engine
 from repositories import posts, users
 
 
@@ -51,7 +53,9 @@ class PostsIntegrationTests(unittest.TestCase):
             if new["id"] != 3:
                 raise AssertionError("기존 최대 번호 다음부터 자동 번호를 생성해야 합니다.")
         cls.posts_patch = patch.object(posts, "connect_db", test_connection)
-        cls.users_patch = patch.object(users, "connect_db", test_connection)
+        test_engine = create_engine(orm_engine.url, connect_args={'options': '-csearch_path=' + cls.schema})
+        cls.addClassCleanup(test_engine.dispose)
+        cls.users_patch = patch.object(users, "session_scope", sessionmaker(test_engine).begin)
         cls.posts_patch.start()
         cls.addClassCleanup(cls.posts_patch.stop)
         cls.users_patch.start()
@@ -62,7 +66,10 @@ class PostsIntegrationTests(unittest.TestCase):
         from monitor.backend.repositories import events as monitor_events, users as monitor_users
         with test_connection() as conn:
             conn.execute(Path(__file__).resolve().parents[2].joinpath('monitor/backend/sql/prepare_monitor.sql').read_text(encoding='utf-8'))
-        for module in (monitor_events, monitor_users):
+        patcher = patch.object(monitor_users, 'session_scope', sessionmaker(test_engine).begin)
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
+        for module in (monitor_events,):
             patcher = patch.object(module, 'connect_db', test_connection)
             patcher.start()
             cls.addClassCleanup(patcher.stop)
@@ -204,6 +211,26 @@ class PostsIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["user"]["username"], "crud-user")
         self.assertNotIn("password_hash", response.get_data(as_text=True))
+
+    def test_general_registration_hash_duplicate_and_login(self):
+        payload = {'username': ' new_student ', 'password': 'test-password', 'password_confirm': 'test-password'}
+        response = self.client.post('/auth/register', json=payload, headers={'Origin': 'http://127.0.0.1:5173'})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json['user']['username'], 'new_student')
+        self.assertNotIn('password', response.get_data(as_text=True))
+        saved = users.find_user('new_student')
+        self.assertTrue(saved['password_hash'].startswith('scrypt:'))
+        self.assertTrue(check_password_hash(saved['password_hash'], payload['password']))
+        self.assertEqual(self.client.post('/auth/register', json=payload).status_code, 409)
+        self.assertEqual(users.find_user('new_student'), saved)
+        self.assertEqual(self.client.post('/auth/login', json={'username': 'new_student', 'password': payload['password']}).status_code, 200)
+
+    def test_general_registration_invalid_payload_and_origin(self):
+        valid = {'username': 'new_student', 'password': 'test-password', 'password_confirm': 'test-password'}
+        for payload in (None, [], {}, {**valid, 'username': 'x'}, {**valid, 'password': 'short'}, {**valid, 'password_confirm': 'different'}):
+            self.assertEqual(self.client.post('/auth/register', json=payload).status_code, 400)
+        self.assertEqual(self.client.post('/auth/register', json=valid, headers={'Origin': 'https://other.example'}).status_code, 403)
+        self.assertIsNone(users.find_user('new_student'))
 
     def test_actual_monitor_receives_request_json(self):
         self.client.get("/")

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Link from "next/link";
 import { Activity, ArrowRight, ShieldCheck } from "lucide-react";
 import { login } from "../api/auth";
 
@@ -99,7 +100,8 @@ export default function LoginForm({ onLogin, initialError, onRetry }) {
             </button>
           )}
           <p className="login-help">
-            계정이 없다면 README의 운영자 계정 생성 안내를 확인하세요.
+            계정이 없나요? <Link className="auth-link" href="/register">회원가입</Link>
+            <br />일반 게시판 계정은 <Link className="auth-link" href="/register/general">여기서 만들기</Link>
           </p>
         </div>
         <p className="login-footnote">

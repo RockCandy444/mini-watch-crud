@@ -7,6 +7,7 @@ if __package__ in (None, ''):
 
 import psycopg
 from flask import Flask
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 from monitor.backend.db import setting
 from monitor.backend.routes.auth import auth_bp
@@ -22,6 +23,7 @@ def create_app(test_config=None):
         SESSION_COOKIE_NAME='mini_watch_monitor',
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
         MAX_CONTENT_LENGTH=1024 * 1024,
+        FRONTEND_ORIGIN=setting('FRONTEND_ORIGIN', 'http://127.0.0.1:5173'),
     )
     if test_config:
         app.config.update(test_config)
@@ -33,6 +35,7 @@ def create_app(test_config=None):
         return {'service': 'monitor', 'status': 'ok'}
 
     @app.errorhandler(psycopg.Error)
+    @app.errorhandler(SQLAlchemyError)
     def database_error(error):
         app.logger.error('Monitor database request failed: %s', type(error).__name__)
         return {'error': 'DB에 연결하지 못했습니다. DB 설정과 준비 상태를 확인해 주세요.'}, 503

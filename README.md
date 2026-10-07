@@ -1,8 +1,23 @@
-# mini watch · React 감시 대시보드
+# mini watch · Next.js 회원가입과 감시 대시보드
 
-Flask·React·PostgreSQL로 만든 게시판과 운영 감시 대시보드입니다.
+Flask·SQLAlchemy·Next.js·PostgreSQL로 만든 회원가입, 게시판과 운영 감시 대시보드입니다.
 기존 일반 서비스의 게시판을 유지하면서 실제 요청 기록 조회, 운영자 로그인,
 관찰 메모 CRUD와 선택 심화 기능 4개를 추가했습니다.
+
+## 회원가입 과제 추가 (2026-10-07)
+
+과제: https://classroom.codemit.kr/classes/5/problems/22/submit
+
+- 기존 React 컴포넌트를 유지하고 실행 환경을 Vite에서 Next.js App Router로 전환했습니다.
+- **대시보드 계정:** http://127.0.0.1:5173/register
+- **일반 게시판 계정:** http://127.0.0.1:5173/register/general
+- 아이디·비밀번호·비밀번호 확인 입력 → Python API 검증 → SQLAlchemy ORM 저장 → 로그인 안내.
+- 비밀번호는 scrypt 해시와 임의 salt로 저장하며 원문이나 해시를 응답에 포함하지 않습니다.
+- 중복 아이디 409, 입력 오류 400, 허용하지 않은 출처 403, DB 연결 오류 503을 처리합니다.
+- 기존 PostgreSQL 계정·게시글·메모를 그대로 사용합니다. 두 서비스의 계정은 별개입니다.
+- 회원가입 테스트를 포함해 감시 8개 + 게시판 12개 = **20개 통과**, Next.js 빌드 성공.
+
+회원가입의 조건별 구현 위치와 확인 방법은 `SIGNUP_GUIDE.md`를 참고하세요.
 
 ## 시작 자료와 직접 작업한 부분
 
@@ -66,13 +81,12 @@ notepad .env
 
 ```cmd
 venv\Scripts\python.exe prepare_db.py
-psql -h 127.0.0.1 -U postgres -d general_db -f sql\prepare_users.sql
 cd ..
 ```
 
 `prepare_db.py`는 기존 게시글을 보존하며 `posts` 테이블과 자동 번호를 준비합니다.
-기존 일반 게시판 로그인 판정도 시험하려면 `general`에서 `venv\Scripts\python.exe create_user.py`로 별도 계정을 만듭니다.
-**감시 화면 운영자 계정은 다음 단계에서 따로 만듭니다.**
+`prepare_db.py`가 `users` 테이블도 준비합니다. 서버 실행 후 회원가입 화면에서 계정을 만드세요.
+터미널 방식을 선호하면 `general`에서 `venv\Scripts\python.exe create_user.py`도 사용할 수 있습니다.
 
 ### 3. 감시 API 설치·DB·운영자 계정 준비
 
@@ -91,12 +105,11 @@ notepad .env
 ```cmd
 venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
 venv\Scripts\python.exe prepare_db.py
-venv\Scripts\python.exe create_user.py
 cd ..\..
 ```
 
-`create_user.py`에서 테스트할 운영자 아이디(예: `operator`)와 본인이 사용할 비밀번호를 두 번 입력합니다.
-비밀번호는 입력 화면에 표시하지 않고 해시만 DB에 저장합니다. 기존 아이디를 입력하면 기존 계정을 유지합니다.
+서버 실행 후 `http://127.0.0.1:5173/register`에서 운영자 계정을 만들고 로그인합니다.
+터미널의 `create_user.py`도 선택적으로 사용할 수 있습니다. 기존 계정은 그대로 사용할 수 있습니다.
 준비 SQL은 `monitor_users`, `http_events`, `notes`를 만들며 기존 자료를 보존합니다.
 
 ### 4. 프론트엔드 설치
@@ -107,8 +120,9 @@ npm ci
 cd ..\..
 ```
 
-`package-lock.json`을 포함했습니다. Vite의 `/api` 프록시는 `http://127.0.0.1:5200`으로 연결되며 Host를 유지하여
-같은 출처의 세션 요청을 처리합니다. 프론트엔드는 DB 비밀번호나 별도의 `.env` 설정이 필요하지 않습니다.
+`package-lock.json`을 포함했습니다. Next.js의 `/api` 프록시는 `http://127.0.0.1:5200`으로 연결되고,
+`/general-api`는 `http://127.0.0.1:5100`으로 연결됩니다. 브라우저의 API 요청은 같은 출처이며
+세션 쿠키를 전달합니다. 프론트엔드는 DB 비밀번호나 별도의 `.env` 설정이 필요하지 않습니다.
 
 ### 5. 세 서비스를 별도 CMD 창에서 실행
 
@@ -128,7 +142,7 @@ cd general
 venv\Scripts\python.exe app.py
 ```
 
-**창 3 · React 대시보드**
+**창 3 · Next.js 회원가입·대시보드**
 
 ```cmd
 cd monitor\frontend
@@ -137,9 +151,10 @@ npm run dev
 
 - 일반 게시판: http://127.0.0.1:5100/
 - 감시 API 상태: http://127.0.0.1:5200/health
-- React 감시 화면: **http://127.0.0.1:5173/**
+- Next.js 감시 화면: **http://127.0.0.1:5173/**
+- 회원가입: **http://127.0.0.1:5173/register** (대시보드), **/register/general** (게시판)
 
-주소의 `127.0.0.1`을 통일해 사용하고 방금 만든 감시 운영자 계정으로 로그인합니다.
+주소의 `127.0.0.1`을 통일해 사용하고 회원가입에서 만든 감시 운영자 계정으로 로그인합니다.
 일반 게시판의 정상 글과 `/board/999999`에 접속한 뒤 감시 화면의 `기록 새로고침`을 눌러 결과를 비교합니다.
 세 서비스는 각 터미널에서 Ctrl+C로 종료합니다. DB 자료는 서버를 종료해도 남습니다.
 
@@ -156,6 +171,7 @@ npm run dev
 | DB_PASSWORD | 해당 DB 계정의 실제 비밀번호, Git 제외 |
 | SECRET_KEY | 감시 세션 서명용 임의 키, Git 제외. 새로고침·서버 재실행 시 같은 값 사용 |
 | MONITOR_URL | 일반 서비스의 요청 전송 주소. 기본 http://127.0.0.1:5200/api/events |
+| FRONTEND_ORIGIN | 허용할 Next.js 화면의 출처. 기본 http://127.0.0.1:5173 |
 
 감시 서비스의 개별 설정을 실행 환경에서 덮어쓸 때는 `MONITOR_DB_HOST`처럼 `MONITOR_` 접두사를 사용합니다.
 키를 설정하지 않으면 실행 때 임의 키를 생성하므로 서버 재실행 후에는 다시 로그인해야 합니다.
@@ -166,21 +182,25 @@ npm run dev
 
 ```text
 general/                         기존 Flask·Jinja2 게시판, 요청 전송 유지
+  models.py                      일반 계정 SQLAlchemy 모델
+common/registration.py           두 서비스 공통 회원가입 입력·출처 검사
 monitor/
   backend/
     app.py                       앱 설정·Blueprint 연결·실행
-    db.py                        psycopg DB 연결
+    db.py                        기존 psycopg 연결 + SQLAlchemy 엔진·세션
+    models.py                    감시 계정 SQLAlchemy 모델
     routes/                      인증·기록·메모 HTTP 처리
-    repositories/                사용자·기록·메모 SQL
+    repositories/                계정 ORM, 기록·메모 SQL
     sql/prepare_monitor.sql      테이블 준비
     prepare_db.py, create_user.py DB 준비 및 해시 계정 생성
     tests/                       실제 PostgreSQL 통합 검증
   frontend/
-    src/App.jsx                  로그인 전후 화면 연결
+    src/app/                     Next.js 레이아웃·대시보드·회원가입 페이지
+    src/App.jsx                  로그인 전후 화면 연결 (클라이언트 컴포넌트)
     src/components/              state·props 화면 구성
     src/api/                     fetch 요청 모듈
     src/style.css                반응형 공통 스타일
-    vite.config.js               /api 프록시
+    next.config.mjs              /api 및 /general-api 프록시
 setup/create_databases.sql        새 환경 DB 생성
 ```
 
@@ -201,7 +221,7 @@ npm run build
 cd ..\..
 ```
 
-2026-10-07 실제 PostgreSQL에서 **감시 테스트 6개, 기존 게시판 테스트 10개 모두 통과**, React 빌드 성공.
+2026-10-07 실제 PostgreSQL에서 **감시 테스트 8개, 게시판 테스트 12개 모두 통과**, Next.js 빌드 성공.
 테스트는 임시 스키마를 만들었다 제거하며 운영 데이터를 수정하지 않습니다. 테스트 DB 계정에 스키마 생성 권한이 필요합니다.
 
 브라우저에서도 실패·성공 로그인, 게시판 실제 200·404 기록 수집, 검색·필터·집계,
@@ -211,6 +231,8 @@ cd ..\..
 
 ## Git 제출
 
-필수 기능 20개와 선택 기능 4개를 구현했습니다. 강의실에서 **GitHub 저장소**를 선택하고
-`https://github.com/RockCandy444/mini-watch-crud`를 입력합니다.
+회원가입 필수 조건 7개와 기존 대시보드 기능을 구현했습니다.
+강의실에서 **GitHub 저장소**를 선택하고 `https://github.com/RockCandy444/mini-watch-crud`를 입력하세요.
+회원가입 구현은 기본 브랜치 `main`에 반영합니다.
+ZIP 방식은 `mini-watch-signup-submit.zip`을 사용할 수 있습니다.
 실제 `.env`, 비밀번호·토큰, 가상환경, `node_modules`, 빌드·캐시는 `.gitignore`로 제외했습니다.

@@ -6,9 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from psycopg import sql
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 from monitor.backend.app import create_app
-from monitor.backend.db import connect_db
+from monitor.backend.db import connect_db, orm_engine
 from monitor.backend.repositories import events, notes, users
 
 
@@ -29,7 +32,12 @@ class MonitorIntegrationTests(unittest.TestCase):
         cls.prepare_sql = Path(__file__).resolve().parents[1].joinpath('sql/prepare_monitor.sql').read_text(encoding='utf-8')
         with test_connection() as conn:
             conn.execute(cls.prepare_sql)
-        for module in (events, notes, users):
+        test_engine = create_engine(orm_engine.url, connect_args={'options': '-csearch_path=' + cls.schema})
+        cls.addClassCleanup(test_engine.dispose)
+        patcher = patch.object(users, 'session_scope', sessionmaker(test_engine).begin)
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
+        for module in (events, notes):
             patcher = patch.object(module, 'connect_db', test_connection)
             patcher.start()
             cls.addClassCleanup(patcher.stop)
@@ -55,6 +63,35 @@ class MonitorIntegrationTests(unittest.TestCase):
         response = self.client.post('/api/notes', json={'title': '  없는 게시글 확인  ', 'body': '  /board/999의 404 확인  ', 'status': '확인 전'})
         self.assertEqual(response.status_code, 201)
         return response.json['note']
+
+    def test_registration_orm_hash_duplicate_and_login(self):
+        payload = {'username': ' new_student ', 'password': 'new-test-password', 'password_confirm': 'new-test-password'}
+        response = self.client.post('/api/auth/register', json=payload, headers={'Origin': 'http://127.0.0.1:5173'})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json['user']['username'], 'new_student')
+        self.assertNotIn('password', response.get_data(as_text=True))
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+        saved = users.find_by_username('new_student')
+        self.assertNotEqual(saved['password_hash'], payload['password'])
+        self.assertTrue(saved['password_hash'].startswith('scrypt:'))
+        self.assertTrue(check_password_hash(saved['password_hash'], payload['password']))
+        self.assertEqual(self.client.post('/api/auth/register', json=payload).status_code, 409)
+        self.assertEqual(users.find_by_username('new_student'), saved)
+        response = self.client.post('/api/auth/login', json={'username': 'new_student', 'password': payload['password']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get('/api/auth/me').json['user']['username'], 'new_student')
+        self.assertEqual(self.client.get('/api/notes').status_code, 200)
+
+    def test_registration_validation_origin_and_database_failure(self):
+        valid = {'username': 'new_student', 'password': 'test-password', 'password_confirm': 'test-password'}
+        for payload in (None, [], {}, {**valid, 'username': 'x'}, {**valid, 'username': 'a b'}, {**valid, 'username': 'x' * 31}, {**valid, 'password': 1}, {**valid, 'password': 'short'}, {**valid, 'password': ' ' * 8}, {**valid, 'password': 'x' * 129}, {**valid, 'password_confirm': 'different'}):
+            self.assertEqual(self.client.post('/api/auth/register', json=payload).status_code, 400)
+        self.assertEqual(self.client.post('/api/auth/register', json=valid, headers={'Origin': 'https://other.example'}).status_code, 403)
+        self.assertIsNone(users.find_by_username('new_student'))
+        with patch.object(users, 'session_scope', side_effect=OperationalError('hidden', {}, Exception('offline'))):
+            response = self.client.post('/api/auth/register', json=valid)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('hidden', response.get_data(as_text=True))
 
     def test_login_validation_hash_session_and_logout(self):
         for data in ([], {}, {'username': ' ', 'password': 'x'}, {'username': 'operator', 'password': '  '}, {'username': 1, 'password': 'x'}):

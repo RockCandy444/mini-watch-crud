@@ -5,10 +5,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function request(path, options = {}) {
+export async function request(path, options = {}, basePath = "/api") {
   let response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetch(`${basePath}${path}`, {
       credentials: "same-origin",
       ...options,
       headers: { "Content-Type": "application/json", ...options.headers },

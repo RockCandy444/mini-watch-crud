@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import * as auth from "./api/auth";
 import LoginForm from "./components/LoginForm";
