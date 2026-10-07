@@ -3,7 +3,7 @@
 general 폴더에서: python -m unittest discover -s tests -v
 기존 posts/users 테이블은 건드리지 않는다.
 """
-import importlib.util
+import sys
 from pathlib import Path
 import threading
 import unittest
@@ -57,10 +57,15 @@ class PostsIntegrationTests(unittest.TestCase):
         cls.users_patch.start()
         cls.addClassCleanup(cls.users_patch.stop)
 
-        monitor_path = Path(__file__).resolve().parents[2] / "monitor" / "backend" / "app.py"
-        spec = importlib.util.spec_from_file_location("crud_test_monitor", monitor_path)
-        monitor = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(monitor)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from monitor.backend import app as monitor
+        from monitor.backend.repositories import events as monitor_events, users as monitor_users
+        with test_connection() as conn:
+            conn.execute(Path(__file__).resolve().parents[2].joinpath('monitor/backend/sql/prepare_monitor.sql').read_text(encoding='utf-8'))
+        for module in (monitor_events, monitor_users):
+            patcher = patch.object(module, 'connect_db', test_connection)
+            patcher.start()
+            cls.addClassCleanup(patcher.stop)
         cls.monitor = monitor
         cls.server = make_server("127.0.0.1", 0, monitor.app)
         cls.addClassCleanup(cls.server.server_close)
@@ -83,7 +88,9 @@ class PostsIntegrationTests(unittest.TestCase):
     def setUp(self):
         with self.test_connection() as conn:
             conn.execute("TRUNCATE TABLE posts, users RESTART IDENTITY")
-        self.monitor.events.clear()
+        with self.test_connection() as conn:
+            conn.execute('TRUNCATE http_events, monitor_users RESTART IDENTITY')
+            conn.execute('INSERT INTO monitor_users (username, password_hash) VALUES (%s, %s)', ('monitor-test', generate_password_hash('test-only-password')))
         self.client = self.app.test_client()
 
     def create(self, title="테스트 제목", body="첫째 줄\n둘째 줄"):
@@ -202,7 +209,9 @@ class PostsIntegrationTests(unittest.TestCase):
         self.client.get("/")
         self.client.post("/board/new", data={"title": "", "body": "내용"})
         self.client.get("/board/999999")
-        events = self.monitor.app.test_client().get("/api/events").json["events"]
+        monitor_client = self.monitor.app.test_client()
+        monitor_client.post('/api/auth/login', json={'username': 'monitor-test', 'password': 'test-only-password'})
+        events = monitor_client.get("/api/events").json["events"]
         self.assertTrue(any(e["path"] == "/" and e["method"] == "GET" and e["status_code"] == 200 for e in events))
         self.assertTrue(any(e["path"] == "/board/new" and e["method"] == "POST" and e["status_code"] == 400 for e in events))
         self.assertTrue(any(e["path"] == "/board/999999" and e["status_code"] == 404 for e in events))
